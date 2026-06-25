@@ -270,6 +270,370 @@ async function deleteBookmark(id) {
 }
 
 // ============================================================
+// STOCKS
+// ============================================================
+
+let currentStockSymbol = null;
+let stockChartCanvas = null;
+
+async function loadStocksSection() {
+  loadIndices();
+  loadWatchlist();
+  loadMovers();
+  loadStockNews();
+  setupStockSearch();
+  setupChartControls();
+}
+
+async function loadIndices() {
+  const data = await api('/api/stocks/indices');
+  const el = document.getElementById('indicesGrid');
+  if (!data || !data.length) {
+    el.innerHTML = '<div class="loading">Market data unavailable</div>';
+    return;
+  }
+  el.innerHTML = data.map(idx => {
+    if (idx.error) return `<div class="index-card"><div class="index-name">${idx.name}</div><div class="index-price">—</div></div>`;
+    const dir = idx.change >= 0 ? 'up' : 'down';
+    const arrow = idx.change >= 0 ? '▲' : '▼';
+    return `
+      <div class="index-card ${dir}" onclick="openStockDetail('${idx.symbol}')">
+        <div class="index-name">${idx.name}</div>
+        <div class="index-price">${formatStockPrice(idx.price, idx.currency)}</div>
+        <div class="index-change ${dir}">${arrow} ${Math.abs(idx.change).toFixed(2)} (${Math.abs(idx.changePct).toFixed(2)}%)</div>
+      </div>
+    `;
+  }).join('');
+
+  // Market status
+  const status = document.getElementById('marketStatus');
+  const states = data.filter(d => d.marketState);
+  const usMarket = states.find(s => s.symbol === '^GSPC');
+  const isOpen = usMarket && usMarket.marketState === 'REGULAR';
+  status.innerHTML = `
+    <div class="market-status-item"><div class="market-dot ${isOpen ? '' : 'closed'}"></div> US Market: ${isOpen ? 'Open' : 'Closed'}</div>
+    ${data.filter(d => !d.error).slice(0, 4).map(d => {
+      const dir = d.change >= 0 ? 'up' : 'down';
+      return `<div class="market-status-item"><strong>${d.name}</strong> <span class="index-change ${dir}">${d.changePct >= 0 ? '+' : ''}${d.changePct.toFixed(2)}%</span></div>`;
+    }).join('')}
+  `;
+}
+
+async function loadWatchlist() {
+  const symbols = await api('/api/stocks/watchlist');
+  if (!symbols || !symbols.length) {
+    document.getElementById('watchlistGrid').innerHTML = '<div class="loading">Add stocks to your watchlist using the search above</div>';
+    return;
+  }
+  const el = document.getElementById('watchlistGrid');
+  el.innerHTML = '<div class="loading">Loading watchlist...</div>';
+
+  const results = [];
+  for (const sym of symbols) {
+    try {
+      const data = await api(`/api/stocks/quote/${sym}`);
+      if (data && !data.error) results.push(data);
+    } catch {}
+  }
+
+  el.innerHTML = results.map(s => {
+    const dir = s.change >= 0 ? 'up' : 'down';
+    const arrow = s.change >= 0 ? '▲' : '▼';
+    const chartPoints = s.chart ? generateMiniChartSVG(s.chart, dir) : '';
+    return `
+      <div class="watchlist-card" onclick="openStockDetail('${s.symbol}')">
+        <button class="watchlist-remove" onclick="event.stopPropagation();removeFromWatchlist('${s.symbol}')">×</button>
+        <div class="watchlist-symbol">${s.symbol}</div>
+        <div class="watchlist-name">${s.name}</div>
+        <div class="watchlist-price">${formatStockPrice(s.price, s.currency)}</div>
+        <div class="watchlist-change ${dir}">${arrow} ${Math.abs(s.change).toFixed(2)} (${Math.abs(s.changePct).toFixed(2)}%)</div>
+        ${chartPoints}
+      </div>
+    `;
+  }).join('') || '<div class="loading">No watchlist data available</div>';
+}
+
+function generateMiniChartSVG(chartData, dir) {
+  if (!chartData || chartData.length < 2) return '';
+  const closes = chartData.map(d => d.close);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = max - min || 1;
+  const w = 240;
+  const h = 40;
+  const points = closes.map((c, i) => {
+    const x = (i / (closes.length - 1)) * w;
+    const y = h - ((c - min) / range) * h;
+    return `${x},${y}`;
+  }).join(' ');
+  const color = dir === 'up' ? '#10b981' : '#ef4444';
+  return `<svg class="mini-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="2"/></svg>`;
+}
+
+async function loadMovers() {
+  const data = await api('/api/stocks/movers');
+  if (!data) return;
+
+  const renderList = (items, elId) => {
+    const el = document.getElementById(elId);
+    el.innerHTML = items.map(s => {
+      const dir = s.changePct >= 0 ? 'up' : 'down';
+      const arrow = s.changePct >= 0 ? '▲' : '▼';
+      return `
+        <div class="mover-item" onclick="openStockDetail('${s.symbol}')">
+          <div>
+            <div class="mover-symbol">${s.symbol.replace('.NS', '')}</div>
+            <div class="mover-name">${s.name}</div>
+          </div>
+          <div>
+            <div class="mover-price">${formatStockPrice(s.price, s.currency)}</div>
+            <div class="mover-change ${dir}">${arrow} ${Math.abs(s.changePct).toFixed(2)}%</div>
+          </div>
+        </div>
+      `;
+    }).join('') || '<div class="loading">No data</div>';
+  };
+
+  renderList(data.gainers, 'gainersList');
+  renderList(data.losers, 'losersList');
+}
+
+async function loadStockNews() {
+  const news = await api('/api/news/stock market');
+  if (news && news.length) {
+    renderNewsCards(news.slice(0, 6), document.getElementById('stockNews'));
+  }
+}
+
+async function openStockDetail(symbol) {
+  currentStockSymbol = symbol;
+  const detail = document.getElementById('stockDetail');
+  detail.style.display = 'block';
+  detail.scrollIntoView({ behavior: 'smooth' });
+
+  const data = await api(`/api/stocks/quote/${symbol}`);
+  if (!data || data.error) {
+    document.getElementById('stockDetailHeader').innerHTML = `<h1>Could not load ${symbol}</h1>`;
+    return;
+  }
+
+  const dir = data.change >= 0 ? 'up' : 'down';
+  const arrow = data.change >= 0 ? '▲' : '▼';
+
+  document.getElementById('stockDetailHeader').innerHTML = `
+    <div class="stock-detail-left">
+      <h1>${data.name}</h1>
+      <span class="symbol-badge">${data.symbol} · ${data.exchange}</span>
+    </div>
+    <div class="stock-detail-right">
+      <div class="stock-detail-price">${formatStockPrice(data.price, data.currency)}</div>
+      <div class="stock-detail-change ${dir}">${arrow} ${Math.abs(data.change).toFixed(2)} (${Math.abs(data.changePct).toFixed(2)}%)</div>
+    </div>
+  `;
+
+  document.getElementById('stockStats').innerHTML = `
+    <div class="stat-item"><div class="stat-label">Day High</div><div class="stat-value">${data.dayHigh}</div></div>
+    <div class="stat-item"><div class="stat-label">Day Low</div><div class="stat-value">${data.dayLow}</div></div>
+    <div class="stat-item"><div class="stat-label">Prev Close</div><div class="stat-value">${data.prevClose}</div></div>
+    <div class="stat-item"><div class="stat-label">Volume</div><div class="stat-value">${formatVolume(data.volume)}</div></div>
+    <div class="stat-item"><div class="stat-label">52W High</div><div class="stat-value">${data.fiftyTwoWeekHigh}</div></div>
+    <div class="stat-item"><div class="stat-label">52W Low</div><div class="stat-value">${data.fiftyTwoWeekLow}</div></div>
+  `;
+
+  loadStockChart(symbol, '1d', '5m');
+}
+
+async function loadStockChart(symbol, range, interval) {
+  const chartData = await api(`/api/stocks/chart/${symbol}?range=${range}&interval=${interval}`);
+  if (!chartData || !chartData.length) return;
+  drawChart(chartData);
+}
+
+function drawChart(data) {
+  const canvas = document.getElementById('stockChart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = 280 * dpr;
+  ctx.scale(dpr, dpr);
+  canvas.style.height = '280px';
+
+  const w = rect.width;
+  const h = 280;
+  const padding = { top: 20, right: 20, bottom: 30, left: 60 };
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+
+  const closes = data.map(d => d.close);
+  const min = Math.min(...closes) * 0.999;
+  const max = Math.max(...closes) * 1.001;
+  const range = max - min;
+
+  const isUp = closes[closes.length - 1] >= closes[0];
+  const lineColor = isUp ? '#10b981' : '#ef4444';
+  const fillColor = isUp ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)';
+
+  // Clear
+  ctx.clearRect(0, 0, w, h);
+
+  // Grid
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 0.5;
+  const gridLines = 5;
+  for (let i = 0; i <= gridLines; i++) {
+    const y = padding.top + (chartH / gridLines) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(w - padding.right, y);
+    ctx.stroke();
+
+    // Labels
+    const val = max - (range / gridLines) * i;
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(val.toFixed(2), padding.left - 8, y + 4);
+  }
+
+  // Line path
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    const x = padding.left + (i / (data.length - 1)) * chartW;
+    const y = padding.top + (1 - (d.close - min) / range) * chartH;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Fill area
+  const lastX = padding.left + chartW;
+  const baseY = padding.top + chartH;
+  ctx.lineTo(lastX, baseY);
+  ctx.lineTo(padding.left, baseY);
+  ctx.closePath();
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+
+  // Current price line
+  const lastClose = closes[closes.length - 1];
+  const priceY = padding.top + (1 - (lastClose - min) / range) * chartH;
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padding.left, priceY);
+  ctx.lineTo(w - padding.right, priceY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Price label
+  ctx.fillStyle = lineColor;
+  ctx.font = 'bold 12px Inter, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(lastClose.toFixed(2), w - padding.right + 4, priceY + 4);
+}
+
+function setupChartControls() {
+  document.querySelectorAll('.chart-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.chart-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (currentStockSymbol) {
+        loadStockChart(currentStockSymbol, btn.dataset.range, btn.dataset.interval);
+      }
+    });
+  });
+}
+
+function setupStockSearch() {
+  const input = document.getElementById('stockSearchInput');
+  const results = document.getElementById('stockSearchResults');
+  let timeout;
+
+  input.addEventListener('input', () => {
+    clearTimeout(timeout);
+    const q = input.value.trim();
+    if (q.length < 2) { results.classList.remove('show'); return; }
+    timeout = setTimeout(async () => {
+      const data = await api(`/api/stocks/search/${encodeURIComponent(q)}`);
+      if (data && data.length) {
+        results.innerHTML = data.map(s => `
+          <div class="search-result-item" onclick="selectStock('${s.symbol}')">
+            <div>
+              <div class="search-result-symbol">${s.symbol}</div>
+              <div class="search-result-name">${s.name}</div>
+            </div>
+            <div class="search-result-exchange">${s.exchange}</div>
+          </div>
+        `).join('');
+        results.classList.add('show');
+      } else {
+        results.classList.remove('show');
+      }
+    }, 300);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') searchStocks();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.stock-search-container')) {
+      results.classList.remove('show');
+    }
+  });
+}
+
+async function searchStocks() {
+  const input = document.getElementById('stockSearchInput');
+  const q = input.value.trim().toUpperCase();
+  if (!q) return;
+  document.getElementById('stockSearchResults').classList.remove('show');
+  openStockDetail(q);
+}
+
+function selectStock(symbol) {
+  document.getElementById('stockSearchInput').value = '';
+  document.getElementById('stockSearchResults').classList.remove('show');
+  openStockDetail(symbol);
+}
+
+async function addToWatchlist(symbol) {
+  await api('/api/stocks/watchlist', { method: 'POST', body: JSON.stringify({ symbol }) });
+  toast(`${symbol} added to watchlist`);
+  loadWatchlist();
+}
+
+async function removeFromWatchlist(symbol) {
+  await api(`/api/stocks/watchlist/${symbol}`, { method: 'DELETE' });
+  toast(`${symbol} removed`);
+  loadWatchlist();
+}
+
+async function refreshWatchlist() {
+  document.getElementById('watchlistGrid').innerHTML = '<div class="loading">Refreshing...</div>';
+  loadWatchlist();
+}
+
+function formatStockPrice(price, currency) {
+  if (currency === 'INR') return `₹${price.toLocaleString('en-IN')}`;
+  if (currency === 'EUR') return `€${price.toLocaleString()}`;
+  if (currency === 'GBP') return `£${price.toLocaleString()}`;
+  return `$${price.toLocaleString()}`;
+}
+
+function formatVolume(vol) {
+  if (!vol) return '—';
+  if (vol >= 1e9) return (vol / 1e9).toFixed(2) + 'B';
+  if (vol >= 1e6) return (vol / 1e6).toFixed(2) + 'M';
+  if (vol >= 1e3) return (vol / 1e3).toFixed(1) + 'K';
+  return vol.toString();
+}
+
+// ============================================================
 // CURRENCY CONVERTER
 // ============================================================
 
@@ -380,6 +744,7 @@ function navigateTo(section) {
 
   // Load section data
   if (section === 'news') loadNews('world');
+  if (section === 'stocks') loadStocksSection();
   if (section === 'crypto') renderCryptoPage();
 
   // Close mobile sidebar

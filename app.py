@@ -113,6 +113,111 @@ def fetch_quote():
     data = r.json()
     return {"text": data[0]["q"], "author": data[0]["a"]}
 
+def fetch_stock_quote(symbol):
+    """Fetch real-time stock data from Yahoo Finance."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers, timeout=8)
+    r.raise_for_status()
+    data = r.json()
+    result = data["chart"]["result"][0]
+    meta = result["meta"]
+    indicators = result["indicators"]["quote"][0]
+    timestamps = result.get("timestamp", [])
+    closes = indicators.get("close", [])
+    volumes = indicators.get("volume", [])
+    highs = indicators.get("high", [])
+    lows = indicators.get("low", [])
+    opens = indicators.get("open", [])
+
+    price = meta.get("regularMarketPrice", 0)
+    prev_close = meta.get("chartPreviousClose", meta.get("previousClose", price))
+    change = price - prev_close
+    change_pct = (change / prev_close * 100) if prev_close else 0
+
+    chart_data = []
+    for i, ts in enumerate(timestamps):
+        if closes[i] is not None:
+            chart_data.append({
+                "time": ts,
+                "open": round(opens[i], 2) if opens[i] else None,
+                "high": round(highs[i], 2) if highs[i] else None,
+                "low": round(lows[i], 2) if lows[i] else None,
+                "close": round(closes[i], 2),
+                "volume": volumes[i]
+            })
+
+    return {
+        "symbol": meta.get("symbol", symbol),
+        "name": meta.get("shortName", meta.get("symbol", symbol)),
+        "price": round(price, 2),
+        "change": round(change, 2),
+        "changePct": round(change_pct, 2),
+        "currency": meta.get("currency", "USD"),
+        "exchange": meta.get("exchangeName", ""),
+        "marketState": meta.get("marketState", ""),
+        "dayHigh": round(meta.get("regularMarketDayHigh", 0), 2),
+        "dayLow": round(meta.get("regularMarketDayLow", 0), 2),
+        "volume": meta.get("regularMarketVolume", 0),
+        "prevClose": round(prev_close, 2),
+        "fiftyTwoWeekHigh": round(meta.get("fiftyTwoWeekHigh", 0), 2),
+        "fiftyTwoWeekLow": round(meta.get("fiftyTwoWeekLow", 0), 2),
+        "chart": chart_data
+    }
+
+def fetch_stock_batch(symbols):
+    """Fetch multiple stocks."""
+    results = []
+    for sym in symbols:
+        try:
+            results.append(fetch_stock_quote(sym))
+        except:
+            results.append({"symbol": sym, "error": True})
+    return results
+
+def fetch_market_indices():
+    """Fetch major market indices."""
+    indices = ["^GSPC", "^DJI", "^IXIC", "^NSEI", "^BSESN", "^GDAXI", "^FTSE"]
+    names = {"^GSPC": "S&P 500", "^DJI": "Dow Jones", "^IXIC": "NASDAQ", "^NSEI": "NIFTY 50", "^BSESN": "SENSEX", "^GDAXI": "DAX", "^FTSE": "FTSE 100"}
+    results = []
+    for idx in indices:
+        try:
+            data = fetch_stock_quote(idx)
+            data["name"] = names.get(idx, data.get("name", idx))
+            results.append(data)
+        except:
+            results.append({"symbol": idx, "name": names.get(idx, idx), "error": True})
+    return results
+
+def fetch_market_movers():
+    """Fetch top gainers and losers — popular stocks."""
+    popular = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "NFLX", "AMD", "INTC",
+               "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "WIPRO.NS"]
+    stocks = fetch_stock_batch(popular)
+    valid = [s for s in stocks if not s.get("error")]
+    gainers = sorted(valid, key=lambda s: s.get("changePct", 0), reverse=True)[:5]
+    losers = sorted(valid, key=lambda s: s.get("changePct", 0))[:5]
+    return {"gainers": gainers, "losers": losers, "all": valid}
+
+def fetch_stock_chart(symbol, interval="1d", range_val="1mo"):
+    """Fetch chart data for a specific timeframe."""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={range_val}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    r = requests.get(url, headers=headers, timeout=8)
+    r.raise_for_status()
+    data = r.json()
+    result = data["chart"]["result"][0]
+    indicators = result["indicators"]["quote"][0]
+    timestamps = result.get("timestamp", [])
+    closes = indicators.get("close", [])
+    volumes = indicators.get("volume", [])
+
+    chart = []
+    for i, ts in enumerate(timestamps):
+        if closes[i] is not None:
+            chart.append({"time": ts, "close": round(closes[i], 2), "volume": volumes[i]})
+    return chart
+
 # ============================================================
 # ROUTES — Pages
 # ============================================================
@@ -235,6 +340,79 @@ def delete_bookmark(bm_id):
     bookmarks = [b for b in bookmarks if b["id"] != bm_id]
     write_json("bookmarks.json", bookmarks)
     return jsonify({"ok": True})
+
+# ============================================================
+# ROUTES — Stocks API
+# ============================================================
+
+@app.route("/api/stocks/indices")
+def api_indices():
+    data = cached("indices", 120, fetch_market_indices)
+    return jsonify(data or [])
+
+@app.route("/api/stocks/movers")
+def api_movers():
+    data = cached("movers", 120, fetch_market_movers)
+    return jsonify(data or {"gainers": [], "losers": [], "all": []})
+
+@app.route("/api/stocks/quote/<symbol>")
+def api_stock_quote(symbol):
+    try:
+        data = fetch_stock_quote(symbol.upper())
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 404
+
+@app.route("/api/stocks/chart/<symbol>")
+def api_stock_chart(symbol):
+    interval = request.args.get("interval", "1d")
+    range_val = request.args.get("range", "1mo")
+    try:
+        data = fetch_stock_chart(symbol.upper(), interval, range_val)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 404
+
+@app.route("/api/stocks/watchlist", methods=["GET"])
+def get_watchlist():
+    return jsonify(read_json("watchlist.json", ["AAPL", "MSFT", "GOOGL", "TSLA", "RELIANCE.NS", "NIFTY50.NS"]))
+
+@app.route("/api/stocks/watchlist", methods=["POST"])
+def add_to_watchlist():
+    watchlist = read_json("watchlist.json", ["AAPL", "MSFT", "GOOGL", "TSLA", "RELIANCE.NS"])
+    symbol = request.json.get("symbol", "").upper()
+    if symbol and symbol not in watchlist:
+        watchlist.append(symbol)
+        write_json("watchlist.json", watchlist)
+    return jsonify(watchlist)
+
+@app.route("/api/stocks/watchlist/<symbol>", methods=["DELETE"])
+def remove_from_watchlist(symbol):
+    watchlist = read_json("watchlist.json", [])
+    watchlist = [s for s in watchlist if s != symbol.upper()]
+    write_json("watchlist.json", watchlist)
+    return jsonify(watchlist)
+
+@app.route("/api/stocks/search/<query>")
+def search_stocks(query):
+    """Search for stock symbols."""
+    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=8&newsCount=0"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        r = requests.get(url, headers=headers, timeout=5)
+        data = r.json()
+        results = []
+        for q in data.get("quotes", []):
+            if q.get("quoteType") in ("EQUITY", "ETF", "INDEX"):
+                results.append({
+                    "symbol": q["symbol"],
+                    "name": q.get("shortname") or q.get("longname", q["symbol"]),
+                    "exchange": q.get("exchange", ""),
+                    "type": q.get("quoteType", "")
+                })
+        return jsonify(results)
+    except:
+        return jsonify([])
 
 @app.route("/api/convert")
 def convert_currency():
