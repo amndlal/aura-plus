@@ -1,0 +1,432 @@
+/* ============================================================
+   Aura+ — Frontend JavaScript
+   SPA-like navigation, API calls, real-time updates
+   ============================================================ */
+
+let dashboardData = null;
+let timerInterval = null;
+let timerSeconds = 25 * 60;
+let timerRunning = false;
+let sessions = 0;
+
+// ============================================================
+// INIT
+// ============================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadDashboard();
+  setupNavigation();
+  setupSearch();
+  setInterval(updateClocks, 60000);
+});
+
+// ============================================================
+// API
+// ============================================================
+
+async function api(path, options = {}) {
+  try {
+    const res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options
+    });
+    return await res.json();
+  } catch (e) {
+    console.error('API error:', e);
+    return null;
+  }
+}
+
+// ============================================================
+// DASHBOARD LOAD
+// ============================================================
+
+async function loadDashboard() {
+  dashboardData = await api('/api/dashboard');
+  if (!dashboardData) {
+    toast('Failed to load dashboard');
+    return;
+  }
+  renderGreeting();
+  renderQuote();
+  renderWeather();
+  renderHomeNews();
+  renderHomeCrypto();
+  renderClocks();
+  renderTasks();
+  renderNotes();
+  renderBookmarks();
+}
+
+// ============================================================
+// RENDER FUNCTIONS
+// ============================================================
+
+function renderGreeting() {
+  const d = dashboardData;
+  document.getElementById('greeting').textContent = `${d.greeting}, Aman`;
+  document.getElementById('topDate').textContent = d.date;
+}
+
+function renderQuote() {
+  const q = dashboardData.quote;
+  if (!q) return;
+  document.getElementById('quoteCard').innerHTML = `
+    <div class="quote-text">"${q.text}"</div>
+    <div class="quote-author">— ${q.author}</div>
+  `;
+}
+
+function renderWeather() {
+  const w = dashboardData.weather;
+  if (!w) return;
+  const strip = document.getElementById('weatherStrip');
+  strip.innerHTML = `
+    <div class="weather-card"><div class="value">${w.temp}°C</div><div class="label">Temperature</div></div>
+    <div class="weather-card"><div class="value">${w.feels}°C</div><div class="label">Feels Like</div></div>
+    <div class="weather-card"><div class="value">${w.humidity}%</div><div class="label">Humidity</div></div>
+    <div class="weather-card"><div class="value">${w.wind} km/h</div><div class="label">Wind</div></div>
+    <div class="weather-card"><div class="value">${w.desc}</div><div class="label">Condition</div></div>
+    ${w.forecast && w.forecast[1] ? `<div class="weather-card"><div class="value">${w.forecast[1].max}°C</div><div class="label">Tomorrow</div></div>` : ''}
+  `;
+}
+
+function renderNewsCards(articles, container) {
+  container.innerHTML = articles.map(a => `
+    <a class="news-card" href="${a.link}" target="_blank" rel="noopener">
+      <div class="news-title">${a.title}</div>
+      <div class="news-meta">${a.source} · ${formatDate(a.date)}</div>
+    </a>
+  `).join('');
+}
+
+function renderHomeNews() {
+  const news = dashboardData.news;
+  if (!news) return;
+  renderNewsCards(news.slice(0, 6), document.getElementById('homeNews'));
+}
+
+function renderHomeCrypto() {
+  const crypto = dashboardData.crypto;
+  if (!crypto) return;
+  const el = document.getElementById('homeCrypto');
+  el.innerHTML = Object.entries(crypto).map(([name, data]) => {
+    const change = data.usd_24h_change || 0;
+    const dir = change >= 0 ? 'up' : 'down';
+    const price = data.usd > 100 ? `$${data.usd.toLocaleString()}` : `$${data.usd.toFixed(4)}`;
+    return `
+      <div class="crypto-card">
+        <div class="crypto-name">${name}</div>
+        <div class="crypto-price">${price}</div>
+        <div class="crypto-change ${dir}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(2)}%</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderClocks() {
+  const clocks = dashboardData.clocks;
+  if (!clocks) return;
+  const el = document.getElementById('clocks');
+  el.innerHTML = Object.entries(clocks).map(([city, data]) => `
+    <div class="clock-row">
+      <span class="city">${city}</span>
+      <span class="time">${data.time}</span>
+    </div>
+  `).join('');
+}
+
+function updateClocks() {
+  if (dashboardData && dashboardData.clocks) {
+    // Re-fetch just clocks on interval
+    loadDashboard();
+  }
+}
+
+// ============================================================
+// NEWS
+// ============================================================
+
+async function loadNews(topic) {
+  const news = await api(`/api/news/${topic}`);
+  if (news) {
+    renderNewsCards(news, document.getElementById('newsGrid'));
+  }
+}
+
+async function searchNews() {
+  const query = document.getElementById('globalSearch').value.trim();
+  if (!query) return;
+  navigateTo('news');
+  const results = await api(`/api/news/search/${encodeURIComponent(query)}`);
+  if (results) {
+    renderNewsCards(results, document.getElementById('newsGrid'));
+    // Deactivate all tabs
+    document.querySelectorAll('#newsTabs .tab').forEach(t => t.classList.remove('active'));
+  }
+}
+
+function setupSearch() {
+  document.getElementById('globalSearch').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') searchNews();
+  });
+}
+
+// ============================================================
+// TASKS
+// ============================================================
+
+function renderTasks() {
+  const tasks = dashboardData.tasks || [];
+  const el = document.getElementById('taskList');
+  const done = tasks.filter(t => t.done).length;
+  document.getElementById('taskStats').textContent = `${done}/${tasks.length} completed`;
+
+  el.innerHTML = tasks.map(t => `
+    <div class="task-item">
+      <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask(${t.id})">
+      <span class="task-text ${t.done ? 'done' : ''}">${t.text}</span>
+      <button class="task-delete" onclick="deleteTask(${t.id})">×</button>
+    </div>
+  `).join('') || '<p style="color:var(--muted);font-size:13px">No tasks yet.</p>';
+}
+
+async function addTask() {
+  const input = document.getElementById('taskInput');
+  const text = input.value.trim();
+  if (!text) return;
+  const task = await api('/api/tasks', { method: 'POST', body: JSON.stringify({ text }) });
+  if (task) {
+    dashboardData.tasks.unshift(task);
+    renderTasks();
+    input.value = '';
+    toast('Task added');
+  }
+}
+
+async function toggleTask(id) {
+  const task = dashboardData.tasks.find(t => t.id === id);
+  if (!task) return;
+  task.done = !task.done;
+  await api(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ done: task.done }) });
+  renderTasks();
+}
+
+async function deleteTask(id) {
+  await api(`/api/tasks/${id}`, { method: 'DELETE' });
+  dashboardData.tasks = dashboardData.tasks.filter(t => t.id !== id);
+  renderTasks();
+  toast('Task deleted');
+}
+
+// ============================================================
+// NOTES
+// ============================================================
+
+function renderNotes() {
+  const notes = dashboardData.notes || { content: '' };
+  document.getElementById('notesArea').value = notes.content;
+}
+
+async function saveNotes() {
+  const content = document.getElementById('notesArea').value;
+  await api('/api/notes', { method: 'POST', body: JSON.stringify({ content }) });
+  toast('Notes saved');
+}
+
+// ============================================================
+// BOOKMARKS
+// ============================================================
+
+function renderBookmarks() {
+  const bms = dashboardData.bookmarks || [];
+  const el = document.getElementById('bookmarkList');
+  el.innerHTML = bms.map(b => `
+    <div class="bookmark-item">
+      <a href="${b.url}" target="_blank">${b.title}</a>
+      <button onclick="deleteBookmark(${b.id})">×</button>
+    </div>
+  `).join('') || '<p style="color:var(--muted);font-size:13px">No bookmarks yet.</p>';
+}
+
+async function addBookmark() {
+  const title = document.getElementById('bmTitle').value.trim();
+  const url = document.getElementById('bmUrl').value.trim();
+  if (!title || !url) return;
+  const bm = await api('/api/bookmarks', { method: 'POST', body: JSON.stringify({ title, url }) });
+  if (bm) {
+    dashboardData.bookmarks.push(bm);
+    renderBookmarks();
+    document.getElementById('bmTitle').value = '';
+    document.getElementById('bmUrl').value = '';
+    toast('Bookmark saved');
+  }
+}
+
+async function deleteBookmark(id) {
+  await api(`/api/bookmarks/${id}`, { method: 'DELETE' });
+  dashboardData.bookmarks = dashboardData.bookmarks.filter(b => b.id !== id);
+  renderBookmarks();
+}
+
+// ============================================================
+// CURRENCY CONVERTER
+// ============================================================
+
+async function convertCurrency() {
+  const amount = document.getElementById('convAmount').value;
+  const from = document.getElementById('convFrom').value;
+  const to = document.getElementById('convTo').value;
+  const result = await api(`/api/convert?amount=${amount}&from=${from}&to=${to}`);
+  if (result) {
+    document.getElementById('convResult').textContent = `${amount} ${from} = ${result.result.toLocaleString()} ${to}`;
+  }
+}
+
+// ============================================================
+// POMODORO TIMER
+// ============================================================
+
+function toggleTimer() {
+  if (timerRunning) {
+    clearInterval(timerInterval);
+    timerRunning = false;
+    document.getElementById('timerStart').textContent = 'Start';
+  } else {
+    timerRunning = true;
+    document.getElementById('timerStart').textContent = 'Pause';
+    timerInterval = setInterval(() => {
+      timerSeconds--;
+      if (timerSeconds <= 0) {
+        clearInterval(timerInterval);
+        timerRunning = false;
+        sessions++;
+        document.getElementById('sessionCount').textContent = sessions;
+        document.getElementById('timerStart').textContent = 'Start';
+        timerSeconds = 25 * 60;
+        toast('Pomodoro complete! Take a break.');
+      }
+      updateTimerDisplay();
+    }, 1000);
+  }
+}
+
+function resetTimer() {
+  clearInterval(timerInterval);
+  timerRunning = false;
+  timerSeconds = 25 * 60;
+  document.getElementById('timerStart').textContent = 'Start';
+  updateTimerDisplay();
+}
+
+function updateTimerDisplay() {
+  const min = Math.floor(timerSeconds / 60).toString().padStart(2, '0');
+  const sec = (timerSeconds % 60).toString().padStart(2, '0');
+  document.getElementById('timerDisplay').textContent = `${min}:${sec}`;
+}
+
+// ============================================================
+// QUICK CALC
+// ============================================================
+
+function quickCalc() {
+  const input = document.getElementById('calcInput').value;
+  try {
+    const result = Function('"use strict"; return (' + input + ')')();
+    document.getElementById('calcResult').textContent = `= ${result}`;
+  } catch {
+    document.getElementById('calcResult').textContent = 'Invalid expression';
+  }
+}
+
+// ============================================================
+// NAVIGATION
+// ============================================================
+
+function setupNavigation() {
+  // Sidebar nav
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    btn.addEventListener('click', () => navigateTo(btn.dataset.section));
+  });
+
+  // "See all" buttons
+  document.querySelectorAll('.see-all').forEach(btn => {
+    btn.addEventListener('click', () => navigateTo(btn.dataset.section));
+  });
+
+  // News tabs
+  document.querySelectorAll('#newsTabs .tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('#newsTabs .tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      loadNews(tab.dataset.topic);
+    });
+  });
+
+  // Mobile menu toggle
+  document.getElementById('menuToggle').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.toggle('open');
+  });
+}
+
+function navigateTo(section) {
+  // Update sidebar
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector(`.nav-item[data-section="${section}"]`).classList.add('active');
+
+  // Update sections
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById(`section-${section}`).classList.add('active');
+
+  // Load section data
+  if (section === 'news') loadNews('world');
+  if (section === 'crypto') renderCryptoPage();
+
+  // Close mobile sidebar
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function renderCryptoPage() {
+  const crypto = dashboardData.crypto;
+  if (!crypto) return;
+  const el = document.getElementById('cryptoGrid');
+  el.innerHTML = Object.entries(crypto).map(([name, data]) => {
+    const change = data.usd_24h_change || 0;
+    const dir = change >= 0 ? 'up' : 'down';
+    const price = data.usd > 100 ? `$${data.usd.toLocaleString()}` : `$${data.usd.toFixed(4)}`;
+    const mcap = data.usd_market_cap ? `$${(data.usd_market_cap / 1e9).toFixed(1)}B` : '';
+    return `
+      <div class="crypto-card">
+        <div class="crypto-name">${name}</div>
+        <div class="crypto-price">${price}</div>
+        <div class="crypto-change ${dir}">${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(2)}%</div>
+        ${mcap ? `<div class="news-meta">Market Cap: ${mcap}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffH = Math.floor((now - d) / 3600000);
+    if (diffH < 1) return 'Just now';
+    if (diffH < 24) return `${diffH}h ago`;
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  } catch {
+    return dateStr.slice(0, 16);
+  }
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
