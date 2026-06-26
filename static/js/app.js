@@ -49,28 +49,34 @@ async function fetchWeather(city = 'Cologne') {
 }
 
 async function fetchNews(topic = 'world', count = 12) {
-  try {
-    const url = `https://api.allorigins.win/raw?url=${encodeURIComponent(`https://news.google.com/rss/search?q=${topic}&hl=en-IN&gl=IN&ceid=IN:en`)}`;
-    const res = await fetch(url);
-    const text = await res.text();
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, 'text/xml');
-    const items = xml.querySelectorAll('item');
-    const articles = [];
-    items.forEach((item, i) => {
-      if (i >= count) return;
-      articles.push({
-        title: item.querySelector('title')?.textContent || '',
-        link: item.querySelector('link')?.textContent || '',
-        source: item.querySelector('source')?.textContent || '',
-        date: item.querySelector('pubDate')?.textContent || ''
+  const proxies = [
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  ];
+  const rssUrl = `https://news.google.com/rss/search?q=${topic}&hl=en-IN&gl=IN&ceid=IN:en`;
+
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy(rssUrl), { signal: AbortSignal.timeout(8000) });
+      const text = await res.text();
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(text, 'text/xml');
+      const items = xml.querySelectorAll('item');
+      if (items.length === 0) continue;
+      const articles = [];
+      items.forEach((item, i) => {
+        if (i >= count) return;
+        articles.push({
+          title: item.querySelector('title')?.textContent || '',
+          link: item.querySelector('link')?.textContent || '',
+          source: item.querySelector('source')?.textContent || '',
+          date: item.querySelector('pubDate')?.textContent || ''
+        });
       });
-    });
-    return articles;
-  } catch (e) {
-    console.error('News fetch error:', e);
-    return [];
+      return articles;
+    } catch (e) { console.warn('Proxy failed, trying next:', e); }
   }
+  return [];
 }
 
 async function fetchCrypto() {
@@ -116,11 +122,17 @@ async function loadDashboard() {
   renderNotes();
   renderBookmarks();
 
+  // Show loading states
+  document.getElementById('quoteCard').innerHTML = '<div class="quote-text">Loading...</div>';
+  document.getElementById('weatherStrip').innerHTML = '<div class="weather-card"><div class="value">...</div><div class="label">Loading weather</div></div>';
+  document.getElementById('homeNews').innerHTML = '<div class="loading">Loading news...</div>';
+  document.getElementById('homeCrypto').innerHTML = '<div class="loading">Loading crypto...</div>';
+
   // Load remote data independently (so one failure doesn't block others)
-  fetchQuote().then(q => { dashboardData.quote = q; renderQuote(); });
-  fetchWeather().then(w => { dashboardData.weather = w; renderWeather(); });
-  fetchNews('world', 6).then(n => { dashboardData.news = n; renderHomeNews(); });
-  fetchCrypto().then(c => { dashboardData.crypto = c; renderHomeCrypto(); });
+  fetchQuote().then(q => { dashboardData.quote = q; renderQuote(); }).catch(() => {});
+  fetchWeather().then(w => { dashboardData.weather = w; renderWeather(); }).catch(() => {});
+  fetchNews('world', 6).then(n => { dashboardData.news = n; renderHomeNews(); }).catch(() => {});
+  fetchCrypto().then(c => { dashboardData.crypto = c; renderHomeCrypto(); }).catch(() => {});
 }
 
 function getClocks() {
