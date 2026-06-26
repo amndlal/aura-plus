@@ -26,11 +26,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function fetchJSON(url) {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { mode: 'cors' });
     if (!res.ok) throw new Error(res.status);
     return await res.json();
   } catch (e) {
-    console.error('Fetch error:', url, e);
+    console.error('Fetch error:', url, e.message);
     return null;
   }
 }
@@ -49,19 +49,17 @@ async function fetchWeather(city = 'Cologne') {
 }
 
 async function fetchNews(topic = 'world', count = 12) {
-  // Use GNews API (free, CORS-friendly, 100 requests/day)
-  const apiKey = '5c011e4b09f2456e16f1f02cf2fe589a';
-  const lang = 'en';
-  const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(topic)}&lang=${lang}&max=${count}&apikey=${apiKey}`;
+  const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(topic)}&hl=en&gl=US&ceid=US:en`;
+  const url = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rssUrl)}`;
   try {
     const res = await fetch(url);
     const data = await res.json();
-    if (data.articles) {
-      return data.articles.map(a => ({
-        title: a.title,
-        link: a.url,
-        source: a.source?.name || '',
-        date: a.publishedAt || ''
+    if (data.status === 'ok' && data.items) {
+      return data.items.slice(0, count).map(item => ({
+        title: item.title || '',
+        link: item.link || '',
+        source: item.author || '',
+        date: item.pubDate || ''
       }));
     }
   } catch (e) { console.error('News error:', e); }
