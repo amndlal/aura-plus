@@ -49,33 +49,22 @@ async function fetchWeather(city = 'Cologne') {
 }
 
 async function fetchNews(topic = 'world', count = 12) {
-  const proxies = [
-    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  ];
-  const rssUrl = `https://news.google.com/rss/search?q=${topic}&hl=en-IN&gl=IN&ceid=IN:en`;
-
-  for (const proxy of proxies) {
-    try {
-      const res = await fetch(proxy(rssUrl), { signal: AbortSignal.timeout(8000) });
-      const text = await res.text();
-      const parser = new DOMParser();
-      const xml = parser.parseFromString(text, 'text/xml');
-      const items = xml.querySelectorAll('item');
-      if (items.length === 0) continue;
-      const articles = [];
-      items.forEach((item, i) => {
-        if (i >= count) return;
-        articles.push({
-          title: item.querySelector('title')?.textContent || '',
-          link: item.querySelector('link')?.textContent || '',
-          source: item.querySelector('source')?.textContent || '',
-          date: item.querySelector('pubDate')?.textContent || ''
-        });
-      });
-      return articles;
-    } catch (e) { console.warn('Proxy failed, trying next:', e); }
-  }
+  // Use GNews API (free, CORS-friendly, 100 requests/day)
+  const apiKey = '5c011e4b09f2456e16f1f02cf2fe589a';
+  const lang = 'en';
+  const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(topic)}&lang=${lang}&max=${count}&apikey=${apiKey}`;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.articles) {
+      return data.articles.map(a => ({
+        title: a.title,
+        link: a.url,
+        source: a.source?.name || '',
+        date: a.publishedAt || ''
+      }));
+    }
+  } catch (e) { console.error('News error:', e); }
   return [];
 }
 
@@ -89,12 +78,24 @@ async function fetchRates() {
 }
 
 async function fetchQuote() {
-  try {
-    const res = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://zenquotes.io/api/random'));
-    const data = await res.json();
-    if (data && data[0]) return { text: data[0].q, author: data[0].a };
-  } catch (e) { console.error('Quote error:', e); }
-  return { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" };
+  // Rotating local quotes (no API needed, no CORS issues)
+  const quotes = [
+    { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+    { text: "Innovation distinguishes between a leader and a follower.", author: "Steve Jobs" },
+    { text: "Quality means doing it right when no one is looking.", author: "Henry Ford" },
+    { text: "What gets measured gets managed.", author: "Peter Drucker" },
+    { text: "Efficiency is doing things right; effectiveness is doing the right things.", author: "Peter Drucker" },
+    { text: "Continuous improvement is better than delayed perfection.", author: "Mark Twain" },
+    { text: "The secret of getting ahead is getting started.", author: "Mark Twain" },
+    { text: "It is not the strongest that survive, but the most adaptable.", author: "Charles Darwin" },
+    { text: "Data beats opinions.", author: "Jim Barksdale" },
+    { text: "Simplicity is the ultimate sophistication.", author: "Leonardo da Vinci" },
+    { text: "If you can't explain it simply, you don't understand it well enough.", author: "Albert Einstein" },
+    { text: "The best time to plant a tree was 20 years ago. The second best time is now.", author: "Chinese Proverb" },
+    { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
+    { text: "In God we trust. All others must bring data.", author: "W. Edwards Deming" }
+  ];
+  return quotes[Math.floor(Math.random() * quotes.length)];
 }
 
 // ============================================================
