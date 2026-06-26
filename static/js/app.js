@@ -36,8 +36,8 @@ async function fetchJSON(url) {
 }
 
 async function fetchWeather(city = 'Cologne') {
-  const data = await fetchJSON(`https://wttr.in/${city}?format=j1`);
-  if (!data) return null;
+  const data = await fetchJSON(`https://wttr.in/${city}?format=j1`).catch(() => null);
+  if (!data || !data.current_condition) return null;
   const current = data.current_condition[0];
   const forecast = (data.weather || []).slice(0, 3).map(day => ({
     date: day.date,
@@ -83,8 +83,11 @@ async function fetchRates() {
 }
 
 async function fetchQuote() {
-  const data = await fetchJSON('https://zenquotes.io/api/random');
-  if (data && data[0]) return { text: data[0].q, author: data[0].a };
+  try {
+    const res = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent('https://zenquotes.io/api/random'));
+    const data = await res.json();
+    if (data && data[0]) return { text: data[0].q, author: data[0].a };
+  } catch (e) { console.error('Quote error:', e); }
   return { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" };
 }
 
@@ -113,23 +116,11 @@ async function loadDashboard() {
   renderNotes();
   renderBookmarks();
 
-  // Then load remote data
-  const [weather, news, crypto, quote] = await Promise.all([
-    fetchWeather(),
-    fetchNews('world', 6),
-    fetchCrypto(),
-    fetchQuote()
-  ]);
-
-  dashboardData.weather = weather;
-  dashboardData.news = news;
-  dashboardData.crypto = crypto;
-  dashboardData.quote = quote;
-
-  renderQuote();
-  renderWeather();
-  renderHomeNews();
-  renderHomeCrypto();
+  // Load remote data independently (so one failure doesn't block others)
+  fetchQuote().then(q => { dashboardData.quote = q; renderQuote(); });
+  fetchWeather().then(w => { dashboardData.weather = w; renderWeather(); });
+  fetchNews('world', 6).then(n => { dashboardData.news = n; renderHomeNews(); });
+  fetchCrypto().then(c => { dashboardData.crypto = c; renderHomeCrypto(); });
 }
 
 function getClocks() {
