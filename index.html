@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aura+</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23667eea'/><text x='50' y='68' font-size='50' font-family='Arial' fill='white' text-anchor='middle' font-weight='bold'>+</text></svg>">
+  <link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon">✨</span>
+        <span class="brand-text">aura<span class="brand-plus">+</span></span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-section="home">
+          <span class="nav-icon">🏠</span> Home
+        </button>
+        <button class="nav-item" data-section="news">
+          <span class="nav-icon">📰</span> News
+        </button>
+        <button class="nav-item" data-section="stocks">
+          <span class="nav-icon">📈</span> Stocks
+        </button>
+        <button class="nav-item" data-section="crypto">
+          <span class="nav-icon">₿</span> Crypto
+        </button>
+        <button class="nav-item" data-section="tasks">
+          <span class="nav-icon">📝</span> Tasks
+        </button>
+        <button class="nav-item" data-section="tools">
+          <span class="nav-icon">🛠️</span> Tools
+        </button>
+      </nav>
+
+      <!-- World Clock in sidebar -->
+      <div class="sidebar-clocks" id="clocks"></div>
+
+      <div class="sidebar-footer">
+        <button class="refresh-btn" onclick="loadDashboard()">🔄 Refresh</button>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <!-- TOP BAR -->
+      <header class="topbar">
+        <button class="menu-toggle" id="menuToggle">☰</button>
+        <div class="greeting" id="greeting"></div>
+        <div class="search-bar">
+          <input type="text" id="globalSearch" placeholder="Search news, topics..." autocomplete="off">
+          <button onclick="searchNews()">🔍</button>
+        </div>
+        <div class="topbar-date" id="topDate"></div>
+      </header>
+
+      <!-- CONTENT SECTIONS -->
+      <div class="content">
+
+        <!-- HOME -->
+        <section class="section active" id="section-home">
+          <!-- Quote -->
+          <div class="quote-card" id="quoteCard"></div>
+
+          <!-- Weather -->
+          <div class="weather-strip" id="weatherStrip"></div>
+
+          <!-- News preview -->
+          <div class="section-header">
+            <h2>Top Stories</h2>
+            <button class="see-all" data-section="news">See all →</button>
+          </div>
+          <div class="news-grid" id="homeNews"></div>
+
+          <!-- Crypto preview -->
+          <div class="section-header">
+            <h2>Crypto Market</h2>
+            <button class="see-all" data-section="crypto">See all →</button>
+          </div>
+          <div class="crypto-strip" id="homeCrypto"></div>
+        </section>
+
+        <!-- NEWS -->
+        <section class="section" id="section-news">
+          <div class="tabs" id="newsTabs">
+            <button class="tab active" data-topic="world">🌍 World</button>
+            <button class="tab" data-topic="technology">💻 Tech</button>
+            <button class="tab" data-topic="business">📈 Business</button>
+            <button class="tab" data-topic="sports">⚽ Sports</button>
+            <button class="tab" data-topic="india">🇮🇳 India</button>
+            <button class="tab" data-topic="germany">🇩🇪 Germany</button>
+            <button class="tab" data-topic="entertainment">🎬 Entertainment</button>
+            <button class="tab" data-topic="science">🔬 Science</button>
+          </div>
+          <div class="news-grid full" id="newsGrid"></div>
+        </section>
+
+        <!-- STOCKS -->
+        <section class="section" id="section-stocks">
+          <!-- Market Status Bar -->
+          <div class="market-status-bar" id="marketStatus"></div>
+
+          <!-- Search -->
+          <div class="stock-search-container">
+            <div class="stock-search-box">
+              <input type="text" id="stockSearchInput" placeholder="Search stocks... (e.g. AAPL, RELIANCE, Tesla)" autocomplete="off">
+              <button class="btn-primary" onclick="searchStocks()">Search</button>
+            </div>
+            <div class="stock-search-results" id="stockSearchResults"></div>
+          </div>
+
+          <!-- Indices -->
+          <div class="section-header">
+            <h2>🌐 Market Indices</h2>
+            <span class="live-badge">LIVE</span>
+          </div>
+          <div class="indices-grid" id="indicesGrid">
+            <div class="loading">Loading market data...</div>
+          </div>
+
+          <!-- Watchlist -->
+          <div class="section-header">
+            <h2>⭐ Your Watchlist</h2>
+            <button class="btn-secondary btn-sm" onclick="refreshWatchlist()">↻ Refresh</button>
+          </div>
+          <div class="watchlist-grid" id="watchlistGrid">
+            <div class="loading">Loading watchlist...</div>
+          </div>
+
+          <!-- Stock Detail Modal -->
+          <div class="stock-detail" id="stockDetail" style="display:none">
+            <div class="stock-detail-header" id="stockDetailHeader"></div>
+            <div class="chart-controls">
+              <button class="chart-btn active" data-range="1d" data-interval="5m">1D</button>
+              <button class="chart-btn" data-range="5d" data-interval="15m">5D</button>
+              <button class="chart-btn" data-range="1mo" data-interval="1d">1M</button>
+              <button class="chart-btn" data-range="3mo" data-interval="1d">3M</button>
+              <button class="chart-btn" data-range="6mo" data-interval="1wk">6M</button>
+              <button class="chart-btn" data-range="1y" data-interval="1wk">1Y</button>
+              <button class="chart-btn" data-range="5y" data-interval="1mo">5Y</button>
+            </div>
+            <canvas id="stockChart" height="280"></canvas>
+            <div class="stock-stats" id="stockStats"></div>
+          </div>
+
+          <!-- Market Movers -->
+          <div class="movers-container">
+            <div class="movers-panel">
+              <div class="section-header"><h2>🚀 Top Gainers</h2></div>
+              <div class="movers-list" id="gainersList"></div>
+            </div>
+            <div class="movers-panel">
+              <div class="section-header"><h2>📉 Top Losers</h2></div>
+              <div class="movers-list" id="losersList"></div>
+            </div>
+          </div>
+
+          <!-- Market News -->
+          <div class="section-header"><h2>📰 Market News</h2></div>
+          <div class="news-grid" id="stockNews"></div>
+        </section>
+
+        <!-- CRYPTO -->
+        <section class="section" id="section-crypto">
+          <h2>Cryptocurrency Market</h2>
+          <div class="crypto-grid" id="cryptoGrid"></div>
+          <div class="converter-card">
+            <h3>💱 Currency Converter</h3>
+            <div class="converter">
+              <input type="number" id="convAmount" value="1" min="0" step="0.01">
+              <select id="convFrom">
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+                <option value="INR">INR</option>
+                <option value="JPY">JPY</option>
+                <option value="AED">AED</option>
+              </select>
+              <span class="conv-arrow">→</span>
+              <select id="convTo">
+                <option value="INR">INR</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+                <option value="JPY">JPY</option>
+                <option value="AED">AED</option>
+              </select>
+              <button class="btn-primary" onclick="convertCurrency()">Convert</button>
+            </div>
+            <div class="conv-result" id="convResult"></div>
+          </div>
+        </section>
+
+        <!-- TASKS -->
+        <section class="section" id="section-tasks">
+          <div class="tasks-layout">
+            <div class="tasks-panel">
+              <h2>📝 Tasks</h2>
+              <div class="task-input">
+                <input type="text" id="taskInput" placeholder="Add a task..." onkeydown="if(event.key==='Enter')addTask()">
+                <button class="btn-primary" onclick="addTask()">Add</button>
+              </div>
+              <div class="task-stats" id="taskStats"></div>
+              <div class="task-list" id="taskList"></div>
+            </div>
+            <div class="notes-panel">
+              <h2>📌 Notes</h2>
+              <textarea id="notesArea" placeholder="Write anything here..."></textarea>
+              <button class="btn-secondary" onclick="saveNotes()">Save Notes</button>
+            </div>
+            <div class="bookmarks-panel">
+              <h2>🔖 Bookmarks</h2>
+              <div class="bookmark-input">
+                <input type="text" id="bmTitle" placeholder="Title">
+                <input type="text" id="bmUrl" placeholder="URL">
+                <button class="btn-primary" onclick="addBookmark()">+</button>
+              </div>
+              <div class="bookmark-list" id="bookmarkList"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TOOLS -->
+        <section class="section" id="section-tools">
+          <h2>🛠️ Tools</h2>
+          <div class="tools-grid">
+            <div class="tool-card">
+              <h3>⏱️ Pomodoro Timer</h3>
+              <div class="pomodoro">
+                <div class="timer-display" id="timerDisplay">25:00</div>
+                <div class="timer-controls">
+                  <button class="btn-primary" id="timerStart" onclick="toggleTimer()">Start</button>
+                  <button class="btn-secondary" onclick="resetTimer()">Reset</button>
+                </div>
+                <div class="timer-sessions">
+                  Sessions: <span id="sessionCount">0</span>
+                </div>
+              </div>
+            </div>
+            <div class="tool-card">
+              <h3>🎯 Quick Links</h3>
+              <div class="quick-links">
+                <a href="https://github.com/amndlal" target="_blank">GitHub</a>
+                <a href="https://linkedin.com/in/amndlal" target="_blank">LinkedIn</a>
+                <a href="https://mail.google.com" target="_blank">Gmail</a>
+                <a href="https://chat.openai.com" target="_blank">ChatGPT</a>
+                <a href="https://youtube.com" target="_blank">YouTube</a>
+                <a href="https://notion.so" target="_blank">Notion</a>
+              </div>
+            </div>
+            <div class="tool-card">
+              <h3>🧮 Quick Calc</h3>
+              <input type="text" id="calcInput" placeholder="e.g. 25 * 4 + 10" onkeydown="if(event.key==='Enter')quickCalc()">
+              <div class="calc-result" id="calcResult"></div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="static/js/app.js"></script>
+</body>
+</html>
